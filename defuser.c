@@ -5,6 +5,9 @@
 
 #define MAX_FIELDS 8
 
+#define u64 uint64_t 
+#define u32 uint32_t
+
 /*
  * 把 values 中的 count 个整数写成一行“空格分隔的无符号十进制整数”，存入 out。
  * 成功返回 0；count 为 0（还没有实现）、snprintf 出错或结果被截断时返回非零。
@@ -24,6 +27,13 @@ int solve_phase_1(uint64_t challenge, char *out, size_t cap) {
     size_t count = 0;
     (void)challenge;
     // TODO: 根据 phase_01 的汇编，用 challenge 算出口令中的各个整数，依次存入 values，并把 count 改为整数个数。
+    u32 low = (u32)challenge;
+    u32 high = (u32)(challenge >> 32);
+    u32 mid = (u32)(challenge >> 16);
+    u32 step1 = (mid ^ 0xdcf) + high * 4;
+    u32 step0 = (low * 5 + high) ^ 0x57bb;
+    values[0] = (step1 + 0xf9b4) ^ step0;
+    count = 1;
     return write_answer(out, cap, values, count);
 }
 
@@ -32,6 +42,8 @@ int solve_phase_2(uint64_t challenge, char *out, size_t cap) {
     size_t count = 0;
     (void)challenge;
     // TODO: 根据 phase_02 的汇编，用 challenge 算出口令中的各个整数，依次存入 values，并把 count 改为整数个数。
+    // 第 2 关进行中：已写好的中间代码暂存在 artifacts/phase02_working.md 第 8 节，
+    // 等循环部分推完再一起写回（半成品会让 -Werror 编译失败）。
     return write_answer(out, cap, values, count);
 }
 
