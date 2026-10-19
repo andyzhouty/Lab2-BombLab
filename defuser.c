@@ -42,8 +42,7 @@ int solve_phase_2(uint64_t challenge, char *out, size_t cap) {
     size_t count = 0;
     (void)challenge;
     // TODO: 根据 phase_02 的汇编，用 challenge 算出口令中的各个整数，依次存入 values，并把 count 改为整数个数。
-    // 第 2 关进行中：已写好的中间代码暂存在 artifacts/phase02_working.md 第 8 节，
-    // 等循环部分推完再一起写回（半成品会让 -Werror 编译失败）。
+    // 第 2 关进行中：循环的递推关系尚未推出，暂不实现，保持未完成状态。
     return write_answer(out, cap, values, count);
 }
 

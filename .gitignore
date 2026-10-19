@@ -14,3 +14,8 @@ __pycache__/
 !/teaching/*.c
 !/teaching/Makefile
 !/teaching/README.md
+# 本地学习资料，不提交
+/gdb_tutorial.md
+/gdb_workbook.md
+/artifacts/phase02_working.md
+/artifacts/phase_02.S
