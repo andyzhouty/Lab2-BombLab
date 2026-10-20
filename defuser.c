@@ -25,8 +25,7 @@ static int write_answer(char *out, size_t cap, const uint32_t *values, size_t co
 int solve_phase_1(uint64_t challenge, char *out, size_t cap) {
     uint32_t values[MAX_FIELDS] = {0};
     size_t count = 0;
-    (void)challenge;
-    // TODO: 根据 phase_01 的汇编，用 challenge 算出口令中的各个整数，依次存入 values，并把 count 改为整数个数。
+
     u32 low = (u32)challenge;
     u32 high = (u32)(challenge >> 32);
     u32 mid = (u32)(challenge >> 16);
@@ -40,9 +39,16 @@ int solve_phase_1(uint64_t challenge, char *out, size_t cap) {
 int solve_phase_2(uint64_t challenge, char *out, size_t cap) {
     uint32_t values[MAX_FIELDS] = {0};
     size_t count = 0;
-    (void)challenge;
-    // TODO: 根据 phase_02 的汇编，用 challenge 算出口令中的各个整数，依次存入 values，并把 count 改为整数个数。
-    // 第 2 关进行中：循环的递推关系尚未推出，暂不实现，保持未完成状态。
+
+    values[0] = (((u32)(challenge >> 5) * 2) & 0x7e) + 0x1d;
+    for (int k = 1; k < 6; k++) {
+        u32 temp = challenge >> (9 + 4 * k);
+        temp &= 0xf;
+        temp ^= k + 1;
+        temp += 3 * values[k-1];
+        values[k] = temp;
+    }
+    count = 6;
     return write_answer(out, cap, values, count);
 }
 
