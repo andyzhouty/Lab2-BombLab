@@ -57,6 +57,38 @@ int solve_phase_3(uint64_t challenge, char *out, size_t cap) {
     size_t count = 0;
     (void)challenge;
     // TODO: 根据 phase_03 的汇编，用 challenge 算出口令中的各个整数，依次存入 values，并把 count 改为整数个数。
+    count = 2;
+    u32 arg1 = challenge & 7;
+    u32 arg2 = (challenge >> 3) ^ (challenge >> 32);
+    values[0] = arg1;
+    u32 t;
+    switch (arg1) {
+        case 0:
+            t = (arg2 * 2) ^ 0x2197;
+            break;
+        case 1:
+            t = 0xf657 + 5 * arg2;
+            break;
+        case 2:
+            t = 0x3679a + 5 * arg2;
+            break;
+        case 3:
+            t = (arg2 ^ 0x770b) + (arg2 >> 2);
+            break;
+        case 4:
+            t = arg2 * 5 + 0x48639;
+            break;
+        case 5:
+            t = arg2 * 4 ^ 0xa6ba;
+            break;
+        case 6:
+            t = (arg2 ^ 0xc6ad) + (arg2 >> 1);
+            break;
+        case 7:
+            t = 0x55f6+ 5 * arg2;
+            break;
+    }
+    values[1] = t;
     return write_answer(out, cap, values, count);
 }
 
