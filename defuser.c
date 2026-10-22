@@ -55,8 +55,11 @@ int solve_phase_2(uint64_t challenge, char *out, size_t cap) {
 int solve_phase_3(uint64_t challenge, char *out, size_t cap) {
     uint32_t values[MAX_FIELDS] = {0};
     size_t count = 0;
-    (void)challenge;
-    // TODO: 根据 phase_03 的汇编，用 challenge 算出口令中的各个整数，依次存入 values，并把 count 改为整数个数。
+    /* phase_03：两个整数
+     *   values[0] = challenge & 7            （决定走哪个分支）
+     *   values[1] = p3 分支(challenge & 7, (challenge >> 3) ^ (challenge >> 32))
+     *   分支编号与 p3_case_N 的序号不是同一个数，按跳转表 0x405820 映射。
+     */
     count = 2;
     u32 arg1 = challenge & 7;
     u32 arg2 = (challenge >> 3) ^ (challenge >> 32);
@@ -92,11 +95,29 @@ int solve_phase_3(uint64_t challenge, char *out, size_t cap) {
     return write_answer(out, cap, values, count);
 }
 
+u32 p4_walk(u32 t, u32 low, u32 high, u32 mix) {
+    u32 m = (high - low) / 2 + low;
+    if (m == t) {
+        return (m + 0xe0) ^ mix;
+    }
+    u32 b = m + mix;
+    if (t >= m) {
+        return (3 * p4_walk(t, m + 1, high, mix) ^ b) ^ 0x1a;
+    }
+    return (3 * p4_walk(t, low, m - 1, mix) ^ b) ^ 0x10;
+}
+
 int solve_phase_4(uint64_t challenge, char *out, size_t cap) {
     uint32_t values[MAX_FIELDS] = {0};
     size_t count = 0;
-    (void)challenge;
-    // TODO: 根据 phase_04 的汇编，用 challenge 算出口令中的各个整数，依次存入 values，并把 count 改为整数个数。
+    /* phase_04：一个整数
+     *   在 [0, 0x7f] 里二分查找 challenge & 0x7f，
+     *   mix = (challenge >> 7) ^ (challenge >> 32)，递归过程见 p4_walk。
+     */
+    count = 1;
+    u32 a1 = challenge & 0x7f;
+    u32 a4 = (u32)((challenge >> 7) ^ (challenge >> 32));
+    values[0] = p4_walk(a1, 0, 0x7f, a4);
     return write_answer(out, cap, values, count);
 }
 

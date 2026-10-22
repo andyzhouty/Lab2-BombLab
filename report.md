@@ -2,7 +2,7 @@
 
 > 姓名 周天佑 / 学号 25300680065（可填可不填）
 > 仓库：`Lab2-BombLab-Copy`
-> 进度：第 1~3 关已完成并通过公开测试；第 4~6 关与 Honor 尚未开始。
+> 进度：第 1~4 关已完成并通过公开测试；第 5、6 关与 Honor 尚未开始。
 > 最后更新：2026-10-19
 
 ## 一、实验环境与工具
@@ -32,7 +32,7 @@ python3 public_test.py --phase N
 | 第 1 关 | 函数调用、参数传递、返回值 | ✅ 完成   | 公开 seed 10/10，另测 seed 123、55555 |
 | 第 2 关 | 数组、循环、递推关系       | ✅ 完成   | 公开 seed 10/10，另测 seed 55555      |
 | 第 3 关 | switch 分支与跳转表        | ✅ 完成   | 公开 seed 10/10，另测 seed 55555        |
-| 第 4 关 | 递归调用与返回过程         | ⬜ 未开始 | —                                    |
+| 第 4 关 | 递归调用与返回过程 | ✅ 完成 | 公开 seed 10/10，另测 5 个非公开 seed |
 | 第 5 关 | 结构体布局、指针、链表遍历 | ⬜ 未开始 | —                                    |
 | 第 6 关 | 函数指针表与间接调用       | ⬜ 未开始 | —                                    |
 | Honor   | 保密                       | ⬜ 未开始 | —                                    |
@@ -558,15 +558,220 @@ python3 public_test.py --phase 3
 
 ![第 3 关通过截图](images/phase3-defused.png)
 
-## 六、尚未完成的部分
+## 六、第 4 关
 
-- 第 4~6 关与 Honor 关卡尚未完成；完成情况将按上面的格式逐关补充。
+### 6.1 输入格式与判定位置
+
+```asm
+4023bd:	mov    $0x1,%esi            # valid_u32_fields 第 2 个参数 = 1
+4023ca:	call   402c80 <valid_u32_fields>
+4023e6:	mov    $0x403189,%esi      # 格式串地址
+4023ee:	call   4011e0 <__isoc99_sscanf@plt>
+4023f3:	cmp    $0x1,%eax            # 必须解析出 1 个数
+4023f6:	jne    4023d3 <phase_04+0x23>
+```
+
+格式串经 `x/s 0x403189` 确认是 `"%u"`，所以这一关的口令只有 1 个整数。
+
+### 6.2 输入在栈上的位置
+
+```asm
+4023e2:	lea    -0x14(%rbp),%rdx
+```
+
+`rdx` 是 `sscanf` 的第 3 个参数，对应格式串里唯一的 `%u`，所以输入被写到 `rbp-0x14`。
+
+### 6.3 调用 p4_walk 的四个参数
+
+```asm
+4023f8:	mov    %r12,%rcx
+4023fb:	mov    %r12,%rax
+4023fe:	mov    %r12d,%edi
+402401:	xor    %esi,%esi
+402403:	shr    $0x20,%rax
+402407:	shr    $0x7,%rcx
+40240b:	and    $0x7f,%edi
+40240e:	mov    $0x7f,%edx
+402413:	xor    %eax,%ecx
+402415:	call   402340 <p4_walk>
+```
+
+| 参数 | 寄存器 | 表达式 |
+| --- | --- | --- |
+| 1 | `rdi` | `challenge & 0x7f` |
+| 2 | `rsi` | `0` |
+| 3 | `rdx` | `0x7f` |
+| 4 | `rcx` | `(challenge >> 7) ^ (challenge >> 32)`（取低 32 位） |
+
+第 1 个参数只保留 challenge 的最低 7 位，范围 0~127；第 4 个参数由 challenge 的两段异或而成，后文记作 `mix`。
+
+### 6.4 p4_walk 的参数含义与终止条件
+
+```asm
+402344:	mov    %edi,%eax            # eax = 第 1 个参数（目标值）
+402346:	mov    %edx,%edi
+402348:	sub    %esi,%edi
+40234a:	shr    $1,%edi
+40234c:	add    %esi,%edi            # edi = low + (high - low) / 2
+40234e:	cmp    %eax,%edi
+402350:	je     4023a0 <p4_walk+0x60>
+```
+
+开头五条指令算的是区间中点 `mid = low + (high - low) / 2`。结合四个参数的实际取值，四个参数的含义是：
+
+| 参数 | 含义 |
+| --- | --- |
+| 第 1 个 | 要查找的目标值，范围 0~127 |
+| 第 2 个 | 区间左端点 `low`，初始为 0 |
+| 第 3 个 | 区间右端点 `high`，初始为 0x7f |
+| 第 4 个 | 每层都会参与异或的一个值 `mix`，递归过程中保持不变 |
+
+终止条件是 `mid == 目标值`，此时跳到 `4023a0`：
+
+```asm
+4023a0:	lea    0xe0(%rdi),%eax      # eax = mid + 0xe0
+4023a6:	xor    %ecx,%eax            # 再异或 mix
+4023a8:	ret
+```
+
+即返回 `(mid + 0xe0) ^ mix`。注意终止时 `rdi` 就是 `mid`，而此时 `mid` 恰好等于目标值。
+
+### 6.5 两个递归分支
+
+```asm
+40235e:	cmp    %edi,%eax
+402360:	jb     402380 <p4_walk+0x40>     # 目标值 < mid 时跳走
+
+# 目标值 >= mid：走右半边
+402362:	lea    0x1(%rdi),%esi            # low = mid + 1
+402365:	mov    %eax,%edi
+402367:	call   402340 <p4_walk>
+40236c:	lea    (%rax,%rax,2),%eax        # eax = 3 * 返回值
+40236f:	xor    %ebx,%eax                 # 异或 (mid + mix)
+402376:	xor    $0x1a,%eax
+
+# 目标值 < mid：走左半边
+402380:	lea    -0x1(%rdi),%edx           # high = mid - 1
+402383:	mov    %eax,%edi
+402385:	call   402340 <p4_walk>
+40238a:	lea    (%rax,%rax,2),%eax        # 同上
+40238d:	xor    %ebx,%eax
+402394:	xor    $0x10,%eax
+```
+
+两个分支的差别有两处：
+
+| 项目 | 右半边（目标值 >= mid） | 左半边（目标值 < mid） |
+| --- | --- | --- |
+| 递归参数 | `low = mid + 1`，`high` 不变 | `high = mid - 1`，`low` 不变 |
+| 最后一步异或 | `0x1a` | `0x10` |
+
+拿到递归返回值后，两条支路的处理相同：先乘 3，再异或 `mid + mix`，最后异或各自的常量。
+
+其中 `ebx` 在 `402357: lea (%rdi,%rcx,1),%ebx` 处提前算好，等于 `mid + mix`；因为 `call` 会覆盖寄存器，所以先存进 `rbx`（被调用者保存寄存器）。
+
+### 6.6 恢复出的计算关系
+
+```c
+static uint32_t p4_walk(uint32_t t, uint32_t low, uint32_t high, uint32_t mix) {
+    uint32_t mid = (high - low) / 2 + low;
+    if (mid == t)
+        return (mid + 0xe0) ^ mix;
+
+    uint32_t base = mid + mix;
+    if (t >= mid)
+        return ((3 * p4_walk(t, mid + 1, high, mix)) ^ base) ^ 0x1a;
+    else
+        return ((3 * p4_walk(t, low, mid - 1, mix)) ^ base) ^ 0x10;
+}
+
+/* 口令： */
+values[0] = p4_walk(challenge & 0x7f, 0, 0x7f,
+                    (uint32_t)((challenge >> 7) ^ (challenge >> 32)));
+```
+
+用一句话概括：在区间 `[0, 127]` 里二分查找目标值，路径上每经过一个中点，就把 `mid + mix` 和上一层的结果混合进返回值，向左走异或 `0x10`，向右走异或 `0x1a`，命中时返回 `(mid + 0xe0) ^ mix`。
+
+### 6.7 推理过程小结
+
+1. 先用 `valid_u32_fields(input, 1)` 和 `cmp $0x1,%eax` 确认只要 1 个整数，格式串是 `"%u"`。
+2. 确定输入写到 `rbp-0x14`（`sscanf` 第 3 个参数）。
+3. 把 `4023f8`~`402413` 逐条翻译，得到调用 `p4_walk` 的四个参数。
+4. 读 `p4_walk` 开头五条指令，认出它在算区间中点，从而理解四个参数是「目标值 + 区间两端 + 一个固定参与运算的数」。
+5. 用 `cmp` + `je` 找到终止条件，用 `cmp` + `jb` 找到两个递归分支。
+6. 用 GDB 脚本观察递归层数与每层返回值，确认递归确实在收窄区间。
+7. 按「参数怎么变、返回值怎么组合」写出递归实现。
+
+遇到的坑：编写左半边分支时，把 `mid - 1` 传给了第 2 个参数（`low`），而汇编改的是第 3 个参数（`high`）。参数传反后区间不再收窄，递归无法终止，运行直接段错误。改正后通过。
+
+### 6.8 GDB 验证记录
+
+先用脚本打印每一层递归的参数（seed 42）：
+
+```bash
+./artifacts/p4_trace.sh 42
+```
+
+```
+depth=1  rdi=114 rsi=0   rdx=127 rcx=0xbdf4c81d
+depth=2  rdi=114 rsi=64  rdx=127 rcx=0xbdf4c81d
+depth=3  rdi=114 rsi=96  rdx=127 rcx=0xbdf4c81d
+depth=4  rdi=114 rsi=112 rdx=127 rcx=0xbdf4c81d
+depth=5  rdi=114 rsi=112 rdx=118 rcx=0xbdf4c81d
+depth=6  rdi=114 rsi=112 rdx=114 rcx=0xbdf4c81d
+depth=7  rdi=114 rsi=114 rdx=114 rcx=0xbdf4c81d
+```
+
+可以看到 `mix`（`rcx`）全程不变，而 `rsi`/`rdx` 是不断收窄的区间两端。
+
+再用脚本观察每一层的返回值：
+
+```bash
+./artifacts/p4_return.sh 42
+```
+
+```
+终止返回  eax=3186936143
+分支A返回 eax=2217382777
+分支B返回 eax=831222507
+分支B返回 eax=693538885
+分支A返回 eax=3254220889
+分支A返回 eax=4161970541
+分支A返回 eax=1438854145
+
+最内层（终止情形）返回值：3186936143
+最外层返回值：            1438854145
+返回总层数：              7
+```
+
+最外层返回值 `1438854145` 就是 `phase_04` 拿去和输入比较的值。两个脚本都通过断点读取 `eax` 得到结果，没有修改被调试程序的任何状态。
+
+### 6.9 验证结果
+
+```bash
+./defuser --seed 42    --phase 4 | ./bomb --seed 42    --phase 4
+./defuser --seed 55555 --phase 4 | ./bomb --seed 55555 --phase 4
+python3 public_test.py --phase 4
+```
+
+公开测试 10/10。另外单独验证了 seed 55555、3、777、12345、424242，均为 `Phase 4 defused.`。
+
+其中 seed 55555 的递归只有 3 层，与 seed 42 的 7 层不同，说明递归深度取决于目标值在区间中的位置。
+
+### 6.10 运行截图
+
+![第 4 关通过截图](images/phase4-defused.png)
+
+## 七、尚未完成的部分
+
+- 第 5、6 关与 Honor 关卡尚未完成；完成情况将按上面的格式逐关补充。
 - 主要困难记录：
   - 第 1 关曾漏读 helper 中的部分指令（`xor`/`add`），后来用"数指令条数逐条翻译"的办法纠正。
   - 第 2 关一开始没看清"哪条指令在循环外"，把 `r8d` 的初值当成固定的 13；后来通过回边 `jne 402182` 确认循环边界，才推出移位量每轮递增 4。
   - 第 3 关：`p3_case_N` 的编号与跳转表下标不一致，一开始容易误以为 `p = N`；实际必须打印跳转表逐项追查。
+  - 第 4 关：递归时把 `mid - 1` 传给了第 2 个参数（`low`）而不是第 3 个（`high`），区间没有收窄，递归不终止，直接段错误。
 
-## 七、辅助工具使用说明
+## 八、辅助工具使用说明
 
 | 工具                           | 用途                                                                                                   |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------ |
@@ -581,7 +786,7 @@ python3 public_test.py --phase 3
 
 > 备注：`bomb` 的只读数据段中存在若干不会被执行的字符串，内容伪装成"给 AI 的指令"或"关卡提示"。这些字符串没有被任何代码引用（`objdump -d` 中搜不到对应地址），属于题目设置的干扰信息，本人未采用其中任何说法。
 
-## 八、参考资料
+## 九、参考资料
 
 - 课程主页与实验文档：[https://ics-26fall-fdu.github.io/](https://ics-26fall-fdu.github.io/)
 - 本仓库 `README.md`、`tutor/README.md`、`teaching/README.md`
