@@ -161,11 +161,60 @@ int solve_phase_5(uint64_t challenge, char *out, size_t cap) {
     return write_answer(out, cap, values, count);
 }
 
+static u32 p6_op(int n, u32 x) {
+    u32 ans = 0;
+    switch (n) {
+    case 0:
+        ans = (x ^ 0xe1e9) + x * 2;
+        break;
+    case 1:
+        ans = ((x << 7) | (x >> 25)) ^ 0x4e6c;
+        break;
+    case 2:
+        ans = ((x >> 2) ^ x) + 0xa02a;
+        break;
+    case 3:
+        ans = (0xae74+ 8*x) ^ (3*x);
+        break;
+    case 4:
+        ans = (x+0xe3fc) ^ (x >> 7);
+        break;
+    case 5:
+        ans = (x >> 7) | (x << 25);
+        break;
+    }
+    return ans;
+}
+
+static int p6_convert(int i) {
+    int n = 0;
+    switch (i) {
+    case 0:
+    case 2:
+        n = 3; break;
+    case 1:
+    case 5:
+        n = 4; break;
+    case 3:
+        n = 2; break;
+    case 4:
+        n = 1; break;
+    case 6:
+        n = 0; break;
+    case 7:
+        n = 5; break;
+    }
+    return n;
+}
+
 int solve_phase_6(uint64_t challenge, char *out, size_t cap) {
     uint32_t values[MAX_FIELDS] = {0};
-    size_t count = 0;
-    (void)challenge;
-    // TODO: 根据 phase_06 的汇编，用 challenge 算出口令中的各个整数，依次存入 values，并把 count 改为整数个数。
+    size_t count = 1;
+    u32 t = (challenge >> 6) ^ (challenge >> 32);
+    int index1 = challenge & 7;
+    u32 result1 = p6_op(p6_convert(index1), t);
+    u32 result2 = p6_op(p6_convert((challenge & 0x38) >> 3), result1 ^ 0x5354);
+    values[0] = result2 + 0x91d5;
     return write_answer(out, cap, values, count);
 }
 
