@@ -219,11 +219,14 @@ int solve_phase_6(uint64_t challenge, char *out, size_t cap) {
 }
 
 int solve_secret(uint64_t challenge, uint64_t context, char *out, size_t cap) {
-    (void)challenge;
-    (void)context;
-    (void)out;
-    (void)cap;
-    // TODO（选做）: 根据 secret_gate、secret_copy 和 secret_phase 的汇编构造完整的第七行，写入 out 后返回 0。
-    // 第七行不一定只有整数，可以直接用 snprintf 写入；还没完成时保持返回 1，测试会显示 not attempted。
-    return 1;
+    u32 ans1 = context & 3;
+    u32 a1 = (challenge >> 32) ^ (u32)challenge;
+    u32 a2 = ((context >> 32) ^ (u32)context);
+    u32 a = a1 ^ a2;
+    u32 b = (0xb1d1 * ans1) ^ (u32)(context >> 16);
+    u32 ans2 = ((((a << 7) | (a >> 25))+0xb1d1)^0x85fd) ^ b;
+    u32 ans3 = ans2 ^ ((a2 + ans1 + 0x85fd) + (a1 >> 7));
+    const char filler[33] = "0xxx4xxx8xxx12xx16xx20xx24xx28xx";  // 前缀不读入，只要长度32即可
+    snprintf(out, cap, "%sOPEN %u %u %u", filler, ans1, ans2, ans3);
+    return 0;
 }

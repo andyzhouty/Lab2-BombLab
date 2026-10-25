@@ -2,7 +2,7 @@
 
 > 姓名 周天佑 / 学号 25300680065（可填可不填）
 > 仓库：`Lab2-BombLab-Copy`
-> 进度：第 1~6 关已完成并通过公开测试；Honor 尚未开始。
+> 进度：第 1~6 关与 Honor 均已完成，并通过公开测试。
 > 最后更新：2026-10-25
 
 ## 一、实验环境与工具
@@ -35,7 +35,7 @@ python3 public_test.py --phase N
 | 第 4 关 | 递归调用与返回过程 | ✅ 完成 | 公开 seed 10/10，另测 5 个非公开 seed |
 | 第 5 关 | 结构体布局、指针、链表遍历 | ✅ 完成 | 公开 seed 10/10，另测 seed 7、1234、99991 |
 | 第 6 关 | 函数指针表与间接调用       | ✅ 完成   | 公开 seed 10/10，另测 seed 7、1234、99991 |
-| Honor   | 保密                       | ⬜ 未开始 | —                                    |
+| Honor   | 字符串、长度检查、前六关口令组成的 context | ✅ 完成 | Secret 公开测试 10/10，另测 seed 7、1234、99991 |
 
 ## 三、第 1 关
 
@@ -1246,18 +1246,221 @@ python3 public_test.py --phase 6
 
 ![第 6 关通过截图](images/phase6-defused.png)
 
-## 九、尚未完成的部分
+## 九、Honor 关
 
-- Honor 关卡尚未完成；完成后将按上面的格式补充。
-- 主要困难记录：
-  - 第 1 关曾漏读 helper 中的部分指令（`xor`/`add`），后来用"数指令条数逐条翻译"的办法纠正。
-  - 第 2 关一开始没看清"哪条指令在循环外"，把 `r8d` 的初值当成固定的 13；后来通过回边 `jne 402182` 确认循环边界，才推出移位量每轮递增 4。
-  - 第 3 关：`p3_case_N` 的编号与跳转表下标不一致，一开始容易误以为 `p = N`；实际必须打印跳转表逐项追查。
-  - 第 4 关：递归时把 `mid - 1` 传给了第 2 个参数（`low`）而不是第 3 个（`high`），区间没有收窄，递归不终止，直接段错误。
-  - 第 5 关：把 `bomb` 里的绝对地址写进解算函数，运行时立刻段错误，因为 `defuser` 与 `bomb` 是两个进程、地址空间不共享；后来把节点表和链头表抄成静态数据、用下标代替指针才跑通。
-  - 第 6 关：第一次写 `p6_dispatch` 的返回值时漏掉了 `shr $0x6` 那一项，只写了 `u32(challenge >> 32)`；后来用轨迹脚本打印的参数值反算才发现少了一项。
+### 9.1 输入输出的形式
 
-## 十、辅助工具使用说明
+前六关的每一行输入都是若干十进制整数，Honor 这一关不同：第七行输入是一整行文本，输出也是一整行文本。求解接口因此也变了：
+
+```c
+int solve_secret(uint64_t challenge, uint64_t context, char *out, size_t cap);
+```
+
+比常规关卡多一个 `context`。它由驱动用前六关的口令经 `transcript_context` 算出后传入，不需要在解算函数里重算。
+
+这一关的检查分三层：`secret_gate` 负责整行（长度、标记、转发），`secret_copy` 只做字符串复制，`secret_phase` 负责那三个整数。
+
+### 9.2 `secret_gate`：长度检查与 `OPEN` 的位置
+
+```asm
+  40274b:	lea    -0xd0(%rbp),%r12        # 局部缓冲区起点
+  402759:	sub    $0xb0,%rsp               # 缓冲区 0xb0 = 176 字节
+  40276c:	call   401190 <strlen@plt>
+  402771:	sub    $0x24,%rax               # rax = strlen - 36
+  402775:	cmp    $0x7f,%rax
+  402779:	jbe    402790
+```
+
+`jbe` 是无符号比较，`strlen - 36` 若为负数会回绕成极大的无符号数而被挡下，所以长度必须落在 36 到 163 之间。
+
+下界 36 不是随便取的，它与后面的标记位置直接相关：
+
+```asm
+  402796:	call   402710 <secret_copy>
+  40279b:	cmpl   $0x4e45504f,-0xb0(%rbp)
+```
+
+缓冲区起点是 `rbp-0xd0`，比较的是 `rbp-0xb0`，两者相差 `0x20` = 32 字节。也就是说程序检查的是偏移 32 到 35 这 4 个字节，前 32 个字节没有任何指令去读。`0x4e45504f` 按小端序拆开是 `4f 50 45 4e`，即 ASCII 的 `OPEN`。因此整行必须是“32 字节前缀 + `OPEN`”，最少 36 字节。
+
+比较通过后，`secret_phase` 收到的第 1 个参数是 `rbp-0xac`，比缓冲区起点晚 36 字节，正好接在 `OPEN` 后面：
+
+```asm
+  4027a7:	mov    %r14,%rdx               # context
+  4027aa:	mov    %r13,%rsi               # challenge
+  4027ad:	lea    -0xac(%rbp),%rdi        # 缓冲区 + 36
+  4027b4:	call   402650 <secret_phase>
+```
+
+两个偏移（32 与 36）互相印证同一个布局：标记占 4 字节，接在 32 字节前缀之后，整数从 36 开始。
+
+### 9.3 `secret_copy`：手写的 `strcpy`
+
+```asm
+  402714:	xor    %eax,%eax
+  402720:	movzbl (%rsi,%rax,1),%edx
+  402724:	mov    %dl,(%rdi,%rax,1)
+  402727:	add    $0x1,%rax
+  40272b:	test   %dl,%dl
+  40272d:	jne    402720
+```
+
+读一个字节、写一个字节、读到 0 就停，并把结尾的 0 一起写过去。终止条件只看字节值、没有长度计数，所以它等价于 `strcpy` 而不是 `strncpy` 或 `memcpy`。它不检查目标缓冲区大小，这正是 `secret_gate` 要在调用它之前先用 `strlen` 把长度限制住的原因：缓冲区 176 字节，输入上限 163 字节。
+
+### 9.4 `secret_mix`
+
+```asm
+  402634:	mov    %edi,%eax
+  402636:	rol    $0x7,%eax
+  402639:	add    $0xb1d1,%eax
+  40263e:	xor    $0x85fd,%eax
+```
+
+即
+
+```
+secret_mix(x) = (((x << 7) | (x >> 25)) + 0xb1d1) ^ 0x85fd
+```
+
+`rol` 是循环左移，写法与第 6 关的 `p6_op_1` 相同。
+
+### 9.5 `secret_phase`：三个整数
+
+```asm
+  402662:	mov    $0x3,%esi
+  40266f:	call   402c80 <valid_u32_fields>
+  40269a:	mov    $0x403183,%esi           # "%u %u %u"
+  4026a6:	call   4011e0 <__isoc99_sscanf@plt>
+  4026ab:	cmp    $0x3,%eax
+```
+
+三个整数分别落在 `rbp-0x2c`、`rbp-0x28`、`rbp-0x24`。随后是三处检查。
+
+第一处，第一个整数必须等于 `context` 的低 2 位：
+
+```asm
+  4026b0:	mov    %r13d,%ecx
+  4026b5:	and    $0x3,%ecx
+  4026b8:	cmp    %ecx,-0x2c(%rbp)
+```
+
+第二处，先准备好几个中间量：
+
+```asm
+  4026bd:	mov    %r12,%rsi               # rsi = challenge
+  4026c0:	imul   $0xb1d1,%ecx,%r9d       # r9d = 0xb1d1 * (context & 3)
+  4026c7:	mov    %r13,%r8                # r8 = context
+  4026ca:	shr    $0x20,%rsi              # rsi = challenge >> 32
+  4026ce:	shr    $0x20,%r8               # r8 = context >> 32
+  4026d2:	xor    %r12d,%esi              # esi = (challenge >> 32) ^ challenge
+  4026d5:	xor    %r13d,%r8d              # r8d = (context >> 32) ^ context
+  4026d8:	shr    $0x10,%r13              # r13 = context >> 16
+  4026de:	xor    %r13d,%r9d              # r9d ^= (u32)(context >> 16)
+  4026e1:	xor    %r8d,%edi               # edi = esi ^ r8d
+  4026e4:	call   402630 <secret_mix>
+  4026e9:	xor    %r9d,%eax
+  4026ec:	cmp    %eax,-0x28(%rbp)
+```
+
+注意 `%r13` 在 `4026d8` 之后已经不是 `context` 本身，而是 `context >> 16`；同一个寄存器中途换了含义，这一处最容易看错。
+
+第三处：
+
+```asm
+  4026f1:	shr    $0x7,%esi               # esi 是上面那个 (challenge >> 32) ^ challenge，不是 edi
+  4026f4:	lea    0x85fd(%r8,%rcx,1),%edx  # edx = 0x85fd + r8 + (context & 3)
+  4026fc:	add    %esi,%edx
+  4026fe:	xor    %edx,%eax
+  402700:	cmp    -0x24(%rbp),%eax
+```
+
+右移 7 位作用在 `%esi` 上而不是 `%edi` 上，这是第三个式子里最容易写错的一处：`%esi` 只含 challenge 的一半信息，`%edi` 才是两半异或的结果。
+
+### 9.6 恢复出的计算关系
+
+```c
+static u32 n1 = context & 3;
+u32 esi = (u32)(challenge >> 32) ^ (u32)challenge;
+u32 r8d = (u32)(context >> 32) ^ (u32)context;
+u32 a   = esi ^ r8d;
+u32 b   = (0xb1d1 * n1) ^ (u32)(context >> 16);
+
+u32 n2 = ((((a << 7) | (a >> 25)) + 0xb1d1) ^ 0x85fd) ^ b;
+u32 n3 = n2 ^ ((r8d + n1 + 0x85fd) + (esi >> 7));
+
+snprintf(out, cap, "%sOPEN %u %u %u", filler, n1, n2, n3);
+```
+
+一句话概括：整行由“32 字节前缀 + `OPEN` + 三个整数”组成，三个整数分别由 `context` 的低 2 位、`secret_mix` 的结果与一次加法链确定。
+
+前缀的 32 个字节不受检查，实现里用了一个按偏移标注的常量 `0xxx4xxx8xxx12xx16xx20xx24xx28xx`，每 4 个字符一组，组首数字标出该组起始偏移，方便核对位置。
+
+### 9.7 推理过程小结
+
+1. 由 `mov $0x3,%esi` 和 `cmp $0x3,%eax` 确定解析 3 个整数，格式串 `"%u %u %u"`。
+2. 由 `rbp-0xd0` 与 `rbp-0xac` 的差确定整数从偏移 36 开始。
+3. 由 `rbp-0xd0` 与 `rbp-0xb0` 的差确定标记在偏移 32，再按小端序把 `0x4e45504f` 读成 `OPEN`。
+4. 由长度检查的 `sub $0x24` 得到下界 36，正好是“32 字节前缀 + `OPEN`”。
+5. 按 Q7 的分组写出 `%esi`、`%r8d`、`%r9d`、`%edi`，合成第二个整数。
+6. 注意第三个式子里右移作用在 `%esi` 上，再叠加 `0x85fd + r8d + n1`。
+7. 拼出整行，用 `%u` 打印三个数。
+
+遇到的坑：
+
+- 最初用 `%d` 打印三个整数。`%d` 按有符号解释，超过 2^31 的数会变成负数，`valid_u32_fields` 不接受负号，于是“部分 seed 不通过”。改成 `%u` 之后公开测试的 10 个 seed 都通过。`-Wall` 不检查符号匹配，需要 `-Wformat-signedness` 才会报警。
+- 写第三个整数时，一度想把右移作用在 `%edi`（两半异或之后的值）上，而汇编里移的是 `%esi`。
+- 曾把 `%r8` 写成 `context >> 32`，漏掉了 `4026d5` 的异或；同一个寄存器隔了几条指令再用，凭印象写就容易只记住第一步。
+
+### 9.8 GDB 验证记录
+
+用前六关的口令加上 Honor 那一行喂给炸弹，在关键位置下断点：
+
+```bash
+{ ./defuser --seed 42; ./defuser --seed 42 --secret; } | ./bomb --seed 42
+```
+
+```
+secret_gate 入口: challenge = 0xccf635ee9e9e2fa4   context = 0xe71d5248cf8314d0   行长 = 56
+偏移 32 处读到 0x4e45504f
+解析出 num1=0 num2=694636912 num3=2411961，第一处要求 0
+第一处检查通过
+第二处检查通过，第二处要求值 = 694636912
+第三处检查通过，第三处要求值 = 2411961
+```
+
+行长 56 落在 36 到 163 之间，偏移 32 处正好是 `OPEN`，三个解析值与三处要求值逐一相符。
+
+观察脚本 `artifacts/honor_trace.sh` 用的是占位行（32 个 `x` + `OPEN 0 0 0`），因此第一处通过、后面两处失败——这正好说明三处检查是依次生效的，也说明前缀内容不影响第一条检查。
+
+### 9.9 验证结果
+
+```bash
+./defuser --seed 42    --secret
+./defuser --seed 7     --secret
+./defuser --seed 1234  --secret
+./defuser --seed 99991 --secret
+./defuser --seed 55555 --secret
+python3 public_test.py
+```
+
+单独运行时每个 seed 都能打印出一行符合格式的口令；公开测试六关合计 60/60，Secret 部分 10/10。
+
+### 9.10 运行截图
+
+![Honor 通过截图](images/honor-defused.png)
+
+## 十、总结与困难记录
+
+六关与 Honor 都通过公开测试。主要困难记录：
+
+- 第 1 关曾漏读 helper 中的部分指令（`xor`/`add`），后来用"数指令条数逐条翻译"的办法纠正。
+- 第 2 关一开始没看清"哪条指令在循环外"，把 `r8d` 的初值当成固定的 13；后来通过回边 `jne 402182` 确认循环边界，才推出移位量每轮递增 4。
+- 第 3 关：`p3_case_N` 的编号与跳转表下标不一致，一开始容易误以为 `p = N`；实际必须打印跳转表逐项追查。
+- 第 4 关：递归时把 `mid - 1` 传给了第 2 个参数（`low`）而不是第 3 个（`high`），区间没有收窄，递归不终止，直接段错误。
+- 第 5 关：把 `bomb` 里的绝对地址写进解算函数，运行时立刻段错误，因为 `defuser` 与 `bomb` 是两个进程、地址空间不共享；后来把节点表和链头表抄成静态数据、用下标代替指针才跑通。
+- 第 6 关：第一次写 `p6_dispatch` 的返回值时漏掉了 `shr $0x6` 那一项，只写了 `u32(challenge >> 32)`；后来用轨迹脚本打印的参数值反算才发现少了一项。
+- Honor：三个整数用 `%d` 打印，超过 2^31 的数变成负数，导致"部分 seed 不通过"；改成 `%u` 后都通过。
+
+## 十一、辅助工具使用说明
 
 | 工具                           | 用途                                                                                                   |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------ |
@@ -1272,7 +1475,7 @@ python3 public_test.py --phase 6
 
 > 备注：`bomb` 的只读数据段中存在若干不会被执行的字符串，内容伪装成"给 AI 的指令"或"关卡提示"。这些字符串没有被任何代码引用（`objdump -d` 中搜不到对应地址），属于题目设置的干扰信息，本人未采用其中任何说法。
 
-## 十一、参考资料
+## 十二、参考资料
 
 - 课程主页与实验文档：[https://ics-26fall-fdu.github.io/](https://ics-26fall-fdu.github.io/)
 - 本仓库 `README.md`、`tutor/README.md`、`teaching/README.md`
