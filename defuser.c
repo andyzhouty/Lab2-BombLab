@@ -5,13 +5,8 @@
 
 #define MAX_FIELDS 8
 
-#define u64 uint64_t 
 #define u32 uint32_t
 
-/*
- * 把 values 中的 count 个整数写成一行“空格分隔的无符号十进制整数”，存入 out。
- * 成功返回 0；count 为 0（还没有实现）、snprintf 出错或结果被截断时返回非零。
- */
 static int write_answer(char *out, size_t cap, const uint32_t *values, size_t count) {
     size_t used = 0;
     for (size_t i = 0; i < count; ++i) {
@@ -24,7 +19,7 @@ static int write_answer(char *out, size_t cap, const uint32_t *values, size_t co
 
 int solve_phase_1(uint64_t challenge, char *out, size_t cap) {
     uint32_t values[MAX_FIELDS] = {0};
-    size_t count = 0;
+    size_t count = 1;
 
     u32 low = (u32)challenge;
     u32 high = (u32)(challenge >> 32);
@@ -32,7 +27,6 @@ int solve_phase_1(uint64_t challenge, char *out, size_t cap) {
     u32 step1 = (mid ^ 0xdcf) + high * 4;
     u32 step0 = (low * 5 + high) ^ 0x57bb;
     values[0] = (step1 + 0xf9b4) ^ step0;
-    count = 1;
     return write_answer(out, cap, values, count);
 }
 
@@ -54,42 +48,41 @@ int solve_phase_2(uint64_t challenge, char *out, size_t cap) {
 
 int solve_phase_3(uint64_t challenge, char *out, size_t cap) {
     uint32_t values[MAX_FIELDS] = {0};
-    size_t count = 0;
+    size_t count = 2;
     /* phase_03：两个整数
      *   values[0] = challenge & 7            （决定走哪个分支）
      *   values[1] = p3 分支(challenge & 7, (challenge >> 3) ^ (challenge >> 32))
      *   分支编号与 p3_case_N 的序号不是同一个数，按跳转表 0x405820 映射。
      */
-    count = 2;
     u32 arg1 = challenge & 7;
     u32 arg2 = (challenge >> 3) ^ (challenge >> 32);
     values[0] = arg1;
     u32 t;
     switch (arg1) {
-        case 0:
-            t = (arg2 * 2) ^ 0x2197;
-            break;
-        case 1:
-            t = 0xf657 + 5 * arg2;
-            break;
-        case 2:
-            t = 0x3679a + 5 * arg2;
-            break;
-        case 3:
-            t = (arg2 ^ 0x770b) + (arg2 >> 2);
-            break;
-        case 4:
-            t = arg2 * 5 + 0x48639;
-            break;
-        case 5:
-            t = arg2 * 4 ^ 0xa6ba;
-            break;
-        case 6:
-            t = (arg2 ^ 0xc6ad) + (arg2 >> 1);
-            break;
-        case 7:
-            t = 0x55f6+ 5 * arg2;
-            break;
+    case 0:
+        t = (arg2 * 2) ^ 0x2197;
+        break;
+    case 1:
+        t = 0xf657 + 5 * arg2;
+        break;
+    case 2:
+        t = 0x3679a + 5 * arg2;
+        break;
+    case 3:
+        t = (arg2 ^ 0x770b) + (arg2 >> 2);
+        break;
+    case 4:
+        t = arg2 * 5 + 0x48639;
+        break;
+    case 5:
+        t = arg2 * 4 ^ 0xa6ba;
+        break;
+    case 6:
+        t = (arg2 ^ 0xc6ad) + (arg2 >> 1);
+        break;
+    case 7:
+        t = 0x55f6+ 5 * arg2;
+        break;
     }
     values[1] = t;
     return write_answer(out, cap, values, count);
@@ -109,12 +102,7 @@ u32 p4_walk(u32 t, u32 low, u32 high, u32 mix) {
 
 int solve_phase_4(uint64_t challenge, char *out, size_t cap) {
     uint32_t values[MAX_FIELDS] = {0};
-    size_t count = 0;
-    /* phase_04：一个整数
-     *   在 [0, 0x7f] 里二分查找 challenge & 0x7f，
-     *   mix = (challenge >> 7) ^ (challenge >> 32)，递归过程见 p4_walk。
-     */
-    count = 1;
+    size_t count = 1;
     u32 a1 = challenge & 0x7f;
     u32 a4 = (u32)((challenge >> 7) ^ (challenge >> 32));
     values[0] = p4_walk(a1, 0, 0x7f, a4);
