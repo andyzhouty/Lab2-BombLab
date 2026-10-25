@@ -123,9 +123,41 @@ int solve_phase_4(uint64_t challenge, char *out, size_t cap) {
 
 int solve_phase_5(uint64_t challenge, char *out, size_t cap) {
     uint32_t values[MAX_FIELDS] = {0};
-    size_t count = 0;
-    (void)challenge;
-    // TODO: 根据 phase_05 的汇编，用 challenge 算出口令中的各个整数，依次存入 values，并把 count 改为整数个数。
+    size_t count = 2;
+    typedef struct {
+        u32 a;
+        u32 b;
+        int next;
+    } P5Node;
+
+    /* 下标 = (节点地址 - 0x405ba0) / 16，对应 working.md 的 5.2 表 */
+    static const P5Node p5_nodes[12] = {
+        { 57768, 1546, 10 },   /* 0  405ba0 -> 405c40 */
+        { 11580,    6,  8 },   /* 1  405bb0 -> 405c20 */
+        { 15414, 2573,  1 },   /* 2  405bc0 -> 405bb0 */
+        { 29357, 1079, 11 },   /* 3  405bd0 -> 405c50 */
+        { 43503,  547,  6 },   /* 4  405be0 -> 405c00 */
+        {  3634, 2942,  4 },   /* 5  405bf0 -> 405be0 */
+        {  7142,  311, -1 },   /* 6  405c00 -> NULL   */
+        { 22399, 1813,  9 },   /* 7  405c10 -> 405c30 */
+        { 15422, 1342,  0 },   /* 8  405c20 -> 405ba0 */
+        { 36474, 2421,  5 },   /* 9  405c30 -> 405bf0 */
+        { 53647, 2107,  3 },   /* 10 405c40 -> 405bd0 */
+        {  1933,  843,  7 },   /* 11 405c50 -> 405c10 */
+    };
+
+    /* 下标 = (head 地址 - 0x405ba0) / 16 */
+    static const int p5_heads[8] = { 2, 1, 8, 0, 10, 3, 11, 7 };
+    int t = (challenge >> 3) & 3;
+    int node = p5_heads[challenge & 7];
+    u32 result = ((((challenge >> 6) ^(challenge >> 32)) ^ p5_nodes[node].a) ^ 0x2511) + p5_nodes[node].b;
+    for (int i = 0; i < t; i++) {
+        node = p5_nodes[node].next;
+        result ^= p5_nodes[node].a;
+        result += p5_nodes[node].b;
+    }
+    values[0] = result;
+    values[1] = p5_nodes[node].b;
     return write_answer(out, cap, values, count);
 }
 
